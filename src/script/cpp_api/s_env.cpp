@@ -423,22 +423,36 @@ void ScriptApiEnv::triggerABM(int id, v3s16 p, MapNode n,
 
 	int error_handler = PUSH_ERROR_HANDLER(L);
 
-	// Get registered_abms
-	lua_getglobal(L, "core");
-	lua_getfield(L, -1, "registered_abms");
-	luaL_checktype(L, -1, LUA_TTABLE);
-	lua_remove(L, -2); // Remove core
+	if (id < 0)
+		throw LuaError("Invalid ABM id");
+	if ((size_t)id >= m_abm_cache.size())
+		m_abm_cache.resize(id + 1);
+	CachedABM &cached = m_abm_cache[id];
 
-	// Get registered_abms[m_id]
-	lua_pushinteger(L, id);
-	lua_gettable(L, -2);
-	FATAL_ERROR_IF(lua_isnil(L, -1), "Entry with given id not found in registered_abms table");
-	lua_remove(L, -2); // Remove registered_abms
+	if (cached.spec_ref == LUA_NOREF) {
+		// Get registered_abms
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "registered_abms");
+		luaL_checktype(L, -1, LUA_TTABLE);
+		lua_remove(L, -2); // Remove core
 
-	setOriginFromTable(-1);
+		// Get registered_abms[m_id]
+		lua_pushinteger(L, id);
+		lua_gettable(L, -2);
+		FATAL_ERROR_IF(lua_isnil(L, -1), "Entry with given id not found in registered_abms table");
+		lua_remove(L, -2); // Remove registered_abms
+		luaL_checktype(L, -1, LUA_TTABLE);
 
-	// Call action
-	luaL_checktype(L, -1, LUA_TTABLE);
+		cached.origin = getstringfield_default(L, -1, "mod_origin", "");
+		lua_pushvalue(L, -1);
+		cached.spec_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+	} else {
+		lua_rawgeti(L, LUA_REGISTRYINDEX, cached.spec_ref);
+	}
+
+	setOriginDirect(cached.origin.c_str());
+
+	// Call action (looked up each time, mods may replace it)
 	lua_getfield(L, -1, "action");
 	luaL_checktype(L, -1, LUA_TFUNCTION);
 	lua_remove(L, -2); // Remove registered_abms[m_id]

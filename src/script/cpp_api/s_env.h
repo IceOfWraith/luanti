@@ -7,6 +7,7 @@
 #include "cpp_api/s_base.h"
 #include "irr_v3d.h"
 #include "mapnode.h"
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -51,6 +52,14 @@ public:
 		const std::unordered_set<v3s16> &positions, float dtime_s);
 
 private:
+	// Per-ABM lookup cache for triggerABM(). core.registered_abms cannot get
+	// new entries after load, so the spec table for an id does not change.
+	struct CachedABM {
+		int spec_ref = LUA_NOREF;
+		std::string origin;
+	};
+	std::vector<CachedABM> m_abm_cache;
+
 	void readABMs();
 
 	void readLBMs();
