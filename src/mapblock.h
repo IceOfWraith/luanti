@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include <vector>
 #include "irr_v3d.h"
 #include "mapnode.h"
@@ -382,22 +384,23 @@ public:
 
 	inline NodeTimer getNodeTimer(v3s16 p)
 	{
-		return m_node_timers.get(p);
+		return m_node_timers ? m_node_timers->get(p) : NodeTimer();
 	}
 
 	inline void removeNodeTimer(v3s16 p)
 	{
-		m_node_timers.remove(p);
+		if (m_node_timers)
+			m_node_timers->remove(p);
 	}
 
 	inline void setNodeTimer(const NodeTimer &t)
 	{
-		m_node_timers.set(t);
+		nodeTimers().set(t);
 	}
 
 	inline void clearNodeTimers()
 	{
-		m_node_timers.clear();
+		m_node_timers.reset();
 	}
 
 	////
@@ -561,7 +564,22 @@ public:
 	StaticObjectList m_static_objects;
 
 private:
-	NodeTimerList m_node_timers;
+	// Most blocks have no node timers, so the list is only allocated when needed
+	std::unique_ptr<NodeTimerList> m_node_timers;
+
+	NodeTimerList &nodeTimers()
+	{
+		if (!m_node_timers)
+			m_node_timers = std::make_unique<NodeTimerList>();
+		return *m_node_timers;
+	}
+	// Frees the timer list if it holds no timers
+	void shrinkNodeTimers()
+	{
+		if (m_node_timers && m_node_timers->empty())
+			m_node_timers.reset();
+	}
+	void serializeNodeTimers(std::ostream &os, u8 version) const;
 };
 
 typedef std::vector<MapBlock*> MapBlockVect;

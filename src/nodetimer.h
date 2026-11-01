@@ -99,6 +99,8 @@ public:
 	// Move forward in time, returns elapsed timers
 	std::vector<NodeTimer> step(float dtime);
 
+	bool empty() const { return m_timers.empty(); }
+
 private:
 	std::multimap<double, NodeTimer> m_timers;
 	std::map<v3s16, std::multimap<double, NodeTimer>::iterator> m_iterators;
