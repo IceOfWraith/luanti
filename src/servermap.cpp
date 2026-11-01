@@ -677,15 +677,24 @@ void ServerMap::endSave()
 
 bool ServerMap::saveBlock(MapBlock *block)
 {
-	// FIXME: serialization happens under mutex
-	MutexAutoLock dblock(m_db.mutex);
-	return saveBlock(block, m_db.dbase, m_map_compression_level);
+	// Serialize and compress before taking the lock, so that emerge threads
+	// are not blocked from reading the database meanwhile.
+	std::string data = serializeBlock(block, m_map_compression_level);
+
+	bool ret;
+	{
+		MutexAutoLock dblock(m_db.mutex);
+		ret = m_db.dbase->saveBlock(block->getPos(), data);
+	}
+	if (ret) {
+		// We just wrote it to the disk so clear modified flag
+		block->resetModified();
+	}
+	return ret;
 }
 
-bool ServerMap::saveBlock(MapBlock *block, MapDatabase *db, int compression_level)
+std::string ServerMap::serializeBlock(MapBlock *block, int compression_level)
 {
-	v3s16 p3d = block->getPos();
-
 	// Format used for writing
 	u8 version = SER_FMT_VER_HIGHEST_WRITE;
 
@@ -698,7 +707,12 @@ bool ServerMap::saveBlock(MapBlock *block, MapDatabase *db, int compression_leve
 	block->serialize(o, version, true, compression_level);
 
 	// FIXME: zero copy possible in c++20 or with custom rdbuf
-	bool ret = db->saveBlock(p3d, o.str());
+	return o.str();
+}
+
+bool ServerMap::saveBlock(MapBlock *block, MapDatabase *db, int compression_level)
+{
+	bool ret = db->saveBlock(block->getPos(), serializeBlock(block, compression_level));
 	if (ret) {
 		// We just wrote it to the disk so clear modified flag
 		block->resetModified();

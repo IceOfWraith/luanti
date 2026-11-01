@@ -117,6 +117,8 @@ public:
 
 	bool saveBlock(MapBlock *block) override;
 	static bool saveBlock(MapBlock *block, MapDatabase *db, int compression_level = -1);
+	// Serializes a block into the format stored in the database
+	static std::string serializeBlock(MapBlock *block, int compression_level = -1);
 
 	/// @brief Splits the version off a serialized block and decompresses it early (if possible)
 	/// @return block data stream, version byte
