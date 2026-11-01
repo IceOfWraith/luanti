@@ -241,17 +241,24 @@ public:
 	static void setDefaultSettings(Settings *settings);
 
 private:
+	struct LightQueueEntry {
+		v3s16 p;
+		u8 light;
+		u32 vi; // index of p in vm->m_area
+	};
+
 	/**
-	 * Spread light to the node at the given position, add to queue if changed.
+	 * Spread light from a node to its 6 neighbors that are inside a,
+	 * adding every changed neighbor to the queue.
 	 * The given light value is diminished once.
-	 * @param a VoxelArea being operated on
-	 * @param queue Queue for later lightSpread() calls
+	 * @param a VoxelArea being operated on, p must be inside it
+	 * @param queue Queue for later spreading
 	 * @param p Node position
+	 * @param vi Index of p in vm->m_area
 	 * @param light Light value (contains both banks)
-	 *
 	 */
-	void lightSpread(VoxelArea &a, std::queue<std::pair<v3s16, u8>> &queue,
-		const v3s16 &p, u8 light);
+	void lightSpreadNeighbors(const VoxelArea &a, std::queue<LightQueueEntry> &queue,
+		v3s16 p, u32 vi, u8 light);
 
 	// isLiquidHorizontallyFlowable() is a helper function for updateLiquid()
 	// that checks whether there are floodable nodes without liquid beneath
