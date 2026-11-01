@@ -171,10 +171,18 @@ bool MapBlock::saveStaticObject(u16 id, const StaticObject &obj, u32 reason)
 	return true;
 }
 
+void MapBlock::serializeNodeTimers(std::ostream &os, u8 version) const
+{
+	static const NodeTimerList empty_list;
+	(m_node_timers ? *m_node_timers : empty_list).serialize(os, version);
+}
+
 void MapBlock::step(float dtime, const std::function<bool(v3s16, MapNode, NodeTimer)> &on_timer_cb)
 {
 	// Run callbacks for elapsed node_timers
-	std::vector<NodeTimer> elapsed_timers = m_node_timers.step(dtime);
+	if (!m_node_timers)
+		return;
+	std::vector<NodeTimer> elapsed_timers = m_node_timers->step(dtime);
 	MapNode n;
 	v3s16 p;
 	for (const auto &it : elapsed_timers) {
@@ -468,7 +476,7 @@ void MapBlock::serialize(std::ostream &os_compressed, u8 version, bool disk, int
 	if (disk) {
 		if (version <= 24) {
 			// Node timers
-			m_node_timers.serialize(os, version);
+			serializeNodeTimers(os, version);
 		}
 
 		// Static objects
@@ -484,7 +492,7 @@ void MapBlock::serialize(std::ostream &os_compressed, u8 version, bool disk, int
 
 		if (version >= 25) {
 			// Node timers
-			m_node_timers.serialize(os, version);
+			serializeNodeTimers(os, version);
 		}
 	}
 
@@ -582,7 +590,8 @@ void MapBlock::deSerializeUncompressed(std::istream &is, u8 version, bool disk)
 
 		TRACESTREAM(<<"MapBlock::deSerialize "<<getPos()
 				<<": Node timers (ver>=25)"<<std::endl);
-		m_node_timers.deSerialize(is, version);
+		nodeTimers().deSerialize(is, version);
+		shrinkNodeTimers();
 
 		if (nimap.size() == 1) {
 			tryShrinkNodes();
@@ -682,7 +691,7 @@ void MapBlock::deSerialize_pre29(std::istream &is, u8 version, bool disk)
 			m_node_metadata.deSerialize(in_raw, m_gamedef->idef());
 		else
 			content_nodemeta_deserialize_legacy(in_raw,
-				&m_node_metadata, &m_node_timers,
+				&m_node_metadata, &nodeTimers(),
 				m_gamedef->idef());
 	} catch(SerializationError &e) {
 		warningstream<<"MapBlock::deSerialize(): Ignoring an error"
@@ -702,7 +711,8 @@ void MapBlock::deSerialize_pre29(std::istream &is, u8 version, bool disk)
 		if (version == 24) {
 			TRACESTREAM(<< "MapBlock::deSerialize " << getPos()
 						<< ": Node timers (ver==24)" << std::endl);
-			m_node_timers.deSerialize(is, version);
+			nodeTimers().deSerialize(is, version);
+			shrinkNodeTimers();
 		}
 
 		// Static objects
@@ -729,7 +739,8 @@ void MapBlock::deSerialize_pre29(std::istream &is, u8 version, bool disk)
 		if(version >= 25){
 			TRACESTREAM(<<"MapBlock::deSerialize "<<getPos()
 					<<": Node timers (ver>=25)"<<std::endl);
-			m_node_timers.deSerialize(is, version);
+			nodeTimers().deSerialize(is, version);
+			shrinkNodeTimers();
 		}
 
 		if (nimap.size() == 1) {
@@ -843,7 +854,7 @@ void MapBlock::deSerialize_pre22(std::istream &is, u8 version, bool disk)
 					std::string data = deSerializeString16(is);
 					std::istringstream iss(data, std::ios_base::binary);
 					content_nodemeta_deserialize_legacy(iss,
-						&m_node_metadata, &m_node_timers,
+						&m_node_metadata, &nodeTimers(),
 						m_gamedef->idef());
 				} else {
 					//std::string data = deSerializeString32(is);
@@ -851,7 +862,7 @@ void MapBlock::deSerialize_pre22(std::istream &is, u8 version, bool disk)
 					decompressZlib(is, oss);
 					std::istringstream iss(oss.str(), std::ios_base::binary);
 					content_nodemeta_deserialize_legacy(iss,
-						&m_node_metadata, &m_node_timers,
+						&m_node_metadata, &nodeTimers(),
 						m_gamedef->idef());
 				}
 			} catch(SerializationError &e) {
