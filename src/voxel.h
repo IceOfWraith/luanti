@@ -488,6 +488,12 @@ public:
 			v3s16 dst_pos, v3s16 from_pos, const v3s16 &size) const;
 
 	/*
+		True if every node in the box at from_pos is the same node and not
+		CONTENT_IGNORE. That node is stored in n.
+	*/
+	bool isUniform(v3s16 from_pos, const v3s16 &size, MapNode &n) const;
+
+	/*
 		Member variables
 	*/
 
@@ -509,4 +515,10 @@ public:
 	u8 *m_flags = nullptr;
 
 	static const MapNode ContentIgnoreNode;
+
+private:
+	template <s16 FixedWidth>
+	void copyRowsFrom(const MapNode *src, bool is_mono_block, s16 width,
+			const v3s16 &size, s32 i_src, s32 src_step,
+			s32 i_local, s32 dest_step, s32 dest_mod);
 };
