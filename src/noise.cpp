@@ -493,22 +493,38 @@ void Noise::resizeNoiseBuf(bool is3d)
  * next octave.
  */
 #define idx(x, y) ((y) * nlx + (x))
+void Noise::precomputeX(float u, float step_x, bool eased)
+{
+	m_xweight.resize(sx);
+	m_xlattice.resize(sx);
+	u32 noisex = 0;
+	for (u32 i = 0; i != sx; i++) {
+		m_xweight[i] = eased ? easeCurve(u) : u;
+		m_xlattice[i] = noisex;
+		u += step_x;
+		if (u >= 1.0) {
+			u -= 1.0;
+			noisex++;
+		}
+	}
+}
+
+
 void Noise::valueMap2D(
 		float x, float y,
 		float step_x, float step_y,
 		s32 seed)
 {
-	float v00, v01, v10, v11, u, v, orig_u;
-	u32 index, i, j, noisex, noisey;
+	u32 index, i, j, noisey;
 	u32 nlx, nly;
 	s32 x0, y0;
+	float u, v;
 
 	bool eased = np.flags & (NOISE_FLAG_DEFAULTS | NOISE_FLAG_EASED);
 	x0 = std::floor(x);
 	y0 = std::floor(y);
 	u = x - (float)x0;
 	v = y - (float)y0;
-	orig_u = u;
 
 	//calculate noise point lattice
 	nlx = (u32)(u + sx * step_x) + 2;
@@ -518,30 +534,26 @@ void Noise::valueMap2D(
 		for (i = 0; i != nlx; i++)
 			noise_buf[index++] = noise2d(x0 + i, y0 + j, seed);
 
+	// The x weights and lattice offsets are the same for every row,
+	// so compute them once. The float operations are identical to the
+	// per-point version, so the results are bit-exact.
+	precomputeX(u, step_x, eased);
+	const float *xw = m_xweight.data();
+	const u32 *xn = m_xlattice.data();
+
 	//calculate interpolations
 	index  = 0;
 	noisey = 0;
 	for (j = 0; j != sy; j++) {
-		v00 = noise_buf[idx(0, noisey)];
-		v10 = noise_buf[idx(1, noisey)];
-		v01 = noise_buf[idx(0, noisey + 1)];
-		v11 = noise_buf[idx(1, noisey + 1)];
+		const float *r0 = &noise_buf[idx(0, noisey)];
+		const float *r1 = &noise_buf[idx(0, noisey + 1)];
+		const float vy = eased ? easeCurve(v) : v;
 
-		u = orig_u;
-		noisex = 0;
 		for (i = 0; i != sx; i++) {
-			value_buf[index++] =
-				biLinearInterpolation(v00, v10, v01, v11, u, v, eased);
-
-			u += step_x;
-			if (u >= 1.0) {
-				u -= 1.0;
-				noisex++;
-				v00 = v10;
-				v01 = v11;
-				v10 = noise_buf[idx(noisex + 1, noisey)];
-				v11 = noise_buf[idx(noisex + 1, noisey + 1)];
-			}
+			const u32 n = xn[i];
+			const float a = linearInterpolation(r0[n], r0[n + 1], xw[i]);
+			const float b = linearInterpolation(r1[n], r1[n + 1], xw[i]);
+			value_buf[index++] = linearInterpolation(a, b, vy);
 		}
 
 		v += step_y;
@@ -560,10 +572,8 @@ void Noise::valueMap3D(
 		float step_x, float step_y, float step_z,
 		s32 seed)
 {
-	float v000, v010, v100, v110;
-	float v001, v011, v101, v111;
-	float u, v, w, orig_u, orig_v;
-	u32 index, i, j, k, noisex, noisey, noisez;
+	float u, v, w, orig_v;
+	u32 index, i, j, k, noisey, noisez;
 	u32 nlx, nly, nlz;
 	s32 x0, y0, z0;
 
@@ -575,7 +585,6 @@ void Noise::valueMap3D(
 	u = x - (float)x0;
 	v = y - (float)y0;
 	w = z - (float)z0;
-	orig_u = u;
 	orig_v = v;
 
 	//calculate noise point lattice
@@ -588,45 +597,36 @@ void Noise::valueMap3D(
 			for (i = 0; i != nlx; i++)
 				noise_buf[index++] = noise3d(x0 + i, y0 + j, z0 + k, seed);
 
+	// See valueMap2D: x weights are shared by all rows, results stay bit-exact.
+	precomputeX(u, step_x, eased);
+	const float *xw = m_xweight.data();
+	const u32 *xn = m_xlattice.data();
+
 	//calculate interpolations
 	index  = 0;
-	noisey = 0;
 	noisez = 0;
 	for (k = 0; k != sz; k++) {
+		const float wz = eased ? easeCurve(w) : w;
 		v = orig_v;
 		noisey = 0;
 		for (j = 0; j != sy; j++) {
-			v000 = noise_buf[idx(0, noisey,     noisez)];
-			v100 = noise_buf[idx(1, noisey,     noisez)];
-			v010 = noise_buf[idx(0, noisey + 1, noisez)];
-			v110 = noise_buf[idx(1, noisey + 1, noisez)];
-			v001 = noise_buf[idx(0, noisey,     noisez + 1)];
-			v101 = noise_buf[idx(1, noisey,     noisez + 1)];
-			v011 = noise_buf[idx(0, noisey + 1, noisez + 1)];
-			v111 = noise_buf[idx(1, noisey + 1, noisez + 1)];
+			const float *r00 = &noise_buf[idx(0, noisey,     noisez)];
+			const float *r10 = &noise_buf[idx(0, noisey + 1, noisez)];
+			const float *r01 = &noise_buf[idx(0, noisey,     noisez + 1)];
+			const float *r11 = &noise_buf[idx(0, noisey + 1, noisez + 1)];
+			const float vy = eased ? easeCurve(v) : v;
 
-			u = orig_u;
-			noisex = 0;
 			for (i = 0; i != sx; i++) {
-				value_buf[index++] = triLinearInterpolation(
-					v000, v100, v010, v110,
-					v001, v101, v011, v111,
-					u, v, w,
-					eased);
-
-				u += step_x;
-				if (u >= 1.0) {
-					u -= 1.0;
-					noisex++;
-					v000 = v100;
-					v010 = v110;
-					v100 = noise_buf[idx(noisex + 1, noisey,     noisez)];
-					v110 = noise_buf[idx(noisex + 1, noisey + 1, noisez)];
-					v001 = v101;
-					v011 = v111;
-					v101 = noise_buf[idx(noisex + 1, noisey,     noisez + 1)];
-					v111 = noise_buf[idx(noisex + 1, noisey + 1, noisez + 1)];
-				}
+				const u32 n = xn[i];
+				const float xi = xw[i];
+				// Same operation order as triLinearInterpolation()
+				const float a = linearInterpolation(r00[n], r00[n + 1], xi);
+				const float b = linearInterpolation(r10[n], r10[n + 1], xi);
+				const float c = linearInterpolation(r01[n], r01[n + 1], xi);
+				const float d = linearInterpolation(r11[n], r11[n + 1], xi);
+				value_buf[index++] = linearInterpolation(
+					linearInterpolation(a, b, vy),
+					linearInterpolation(c, d, vy), wz);
 			}
 
 			v += step_y;
