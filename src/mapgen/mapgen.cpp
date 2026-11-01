@@ -426,14 +426,11 @@ void Mapgen::setLighting(u8 light, v3s16 nmin, v3s16 nmax)
 }
 
 
-void Mapgen::lightSpread(VoxelArea &a, std::queue<std::pair<v3s16, u8>> &queue,
-	const v3s16 &p, u8 light)
+void Mapgen::lightSpreadNeighbors(const VoxelArea &a,
+	std::queue<LightQueueEntry> &queue, v3s16 p, u32 vi, u8 light)
 {
-	if (light <= 1 || !a.contains(p))
+	if (light <= 1)
 		return;
-
-	u32 vi = vm->m_area.index(p);
-	MapNode &n = vm->m_data[vi];
 
 	// Decay light in each of the banks separately
 	u8 light_day = light & 0x0F;
@@ -444,22 +441,41 @@ void Mapgen::lightSpread(VoxelArea &a, std::queue<std::pair<v3s16, u8>> &queue,
 	if (light_night > 0)
 		light_night -= 0x10;
 
-	// Bail out only if we have no more light from either bank to propagate, or
-	// we hit a solid block that light cannot pass through.
-	if ((light_day  <= (n.param1 & 0x0F) &&
-			light_night <= (n.param1 & 0xF0)) ||
-			!ndef->getLightingFlags(n).light_propagates)
-		return;
+	const v3s32 &em = vm->m_area.getExtent();
+	const s32 dz = em.X * em.Y, dy = em.X;
 
-	// MYMAX still needed here because we only exit early if both banks have
-	// nothing to propagate anymore.
-	light = MYMAX(light_day, n.param1 & 0x0F) |
-			MYMAX(light_night, n.param1 & 0xF0);
+	auto spread = [&](v3s16 np, u32 ni) {
+		MapNode &n = vm->m_data[ni];
 
-	n.param1 = light;
+		// Bail out only if we have no more light from either bank to propagate, or
+		// we hit a solid block that light cannot pass through.
+		if ((light_day  <= (n.param1 & 0x0F) &&
+				light_night <= (n.param1 & 0xF0)) ||
+				!ndef->getLightingFlags(n).light_propagates)
+			return;
 
-	// add to queue
-	queue.emplace(p, light);
+		// MYMAX still needed here because we only exit early if both banks have
+		// nothing to propagate anymore.
+		n.param1 = MYMAX(light_day, n.param1 & 0x0F) |
+				MYMAX(light_night, n.param1 & 0xF0);
+
+		queue.push({np, n.param1, ni});
+	};
+
+	// Same order as g_6dirs. Since p is inside a, only one axis needs a
+	// bounds check per direction.
+	if (p.Z < a.MaxEdge.Z)
+		spread(v3s16(p.X, p.Y, p.Z + 1), vi + dz);
+	if (p.Y < a.MaxEdge.Y)
+		spread(v3s16(p.X, p.Y + 1, p.Z), vi + dy);
+	if (p.X < a.MaxEdge.X)
+		spread(v3s16(p.X + 1, p.Y, p.Z), vi + 1);
+	if (p.Z > a.MinEdge.Z)
+		spread(v3s16(p.X, p.Y, p.Z - 1), vi - dz);
+	if (p.Y > a.MinEdge.Y)
+		spread(v3s16(p.X, p.Y - 1, p.Z), vi - dy);
+	if (p.X > a.MinEdge.X)
+		spread(v3s16(p.X - 1, p.Y, p.Z), vi - 1);
 }
 
 
@@ -512,7 +528,7 @@ void Mapgen::propagateSunlight(v3s16 nmin, v3s16 nmax, bool propagate_shadow)
 void Mapgen::spreadLight(const v3s16 &nmin, const v3s16 &nmax)
 {
 	//TimeTaker t("spreadLight");
-	std::queue<std::pair<v3s16, u8>> queue;
+	std::queue<LightQueueEntry> queue;
 	VoxelArea a(nmin, nmax);
 
 	for (int z = a.MinEdge.Z; z <= a.MaxEdge.Z; z++) {
@@ -534,23 +550,17 @@ void Mapgen::spreadLight(const v3s16 &nmin, const v3s16 &nmax)
 				if (light_produced)
 					n.param1 = light_produced | (light_produced << 4);
 
-				u8 light = n.param1;
-				if (light) {
-					const v3s16 p(x, y, z);
-					// spread to all 6 neighbor nodes
-					for (const auto &dir : g_6dirs)
-						lightSpread(a, queue, p + dir, light);
-				}
+				// spread to all 6 neighbor nodes
+				lightSpreadNeighbors(a, queue, v3s16(x, y, z), i, n.param1);
 			}
 		}
 	}
 
 	while (!queue.empty()) {
-		const auto &i = queue.front();
-		// spread to all 6 neighbor nodes
-		for (const auto &dir : g_6dirs)
-			lightSpread(a, queue, i.first + dir, i.second);
+		const LightQueueEntry e = queue.front();
 		queue.pop();
+		// spread to all 6 neighbor nodes
+		lightSpreadNeighbors(a, queue, e.p, e.vi, e.light);
 	}
 
 	//printf("spreadLight: %lums\n", t.stop());
