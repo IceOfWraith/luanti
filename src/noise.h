@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "irr_v3d.h"
 #include "exceptions.h"
 #include "util/string.h"
@@ -194,6 +196,11 @@ public:
 	}
 
 private:
+	// Per-column x interpolation weight and lattice offset, reused across rows
+	std::vector<float> m_xweight;
+	std::vector<u32> m_xlattice;
+
+	void precomputeX(float u, float step_x, bool eased);
 	void allocBuffers();
 	void resizeNoiseBuf(bool is3d);
 	void updateResults(float g, float *gmap, const float *persistence_map,
