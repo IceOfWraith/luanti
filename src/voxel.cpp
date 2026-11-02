@@ -213,14 +213,30 @@ void VoxelManipulator::copyFrom(MapNode *src, bool is_mono_block, const VoxelAre
 	s32 i_src = src_area.index(from_pos.X, from_pos.Y, from_pos.Z);
 	s32 i_local = m_area.index(to_pos.X, to_pos.Y, to_pos.Z);
 
+	// Rows are short (one MapBlock wide), so a constant row width lets the
+	// compiler inline the copies instead of calling memcpy/memset per row.
+	if (size.X == MAP_BLOCKSIZE)
+		copyRowsFrom<MAP_BLOCKSIZE>(src, is_mono_block, size.X, size,
+				i_src, src_step, i_local, dest_step, dest_mod);
+	else
+		copyRowsFrom<0>(src, is_mono_block, size.X, size,
+				i_src, src_step, i_local, dest_step, dest_mod);
+}
+
+template <s16 FixedWidth>
+void VoxelManipulator::copyRowsFrom(const MapNode *src, bool is_mono_block,
+		s16 width, const v3s16 &size, s32 i_src, s32 src_step,
+		s32 i_local, s32 dest_step, s32 dest_mod)
+{
+	const s16 w = FixedWidth ? FixedWidth : width;
 	for (s16 z = 0; z < size.Z; z++) {
 		for (s16 y = 0; y < size.Y; y++) {
 			if (is_mono_block) {
-				std::fill_n(m_data + i_local, size.X, src[0]);
+				std::fill_n(m_data + i_local, w, src[0]);
 			} else {
-				std::copy_n(src + i_src, size.X, m_data + i_local);
+				std::copy_n(src + i_src, w, m_data + i_local);
 			}
-			std::fill_n(m_flags + i_local, size.X, 0);
+			std::fill_n(m_flags + i_local, w, 0);
 			i_src += src_step;
 			i_local += dest_step;
 		}
@@ -236,13 +252,48 @@ void VoxelManipulator::copyTo(MapNode *dst, const VoxelArea& dst_area,
 	{
 		s32 i_dst = dst_area.index(dst_pos.X, dst_pos.Y+y, dst_pos.Z+z);
 		s32 i_local = m_area.index(from_pos.X, from_pos.Y+y, from_pos.Z+z);
+		const MapNode *row = m_data + i_local;
+		bool has_ignore = false;
+		for (s16 x = 0; x < size.X; x++)
+			has_ignore |= row[x].getContent() == CONTENT_IGNORE;
+		if (!has_ignore) {
+			std::copy_n(row, size.X, dst + i_dst);
+			continue;
+		}
 		for (s16 x = 0; x < size.X; x++) {
-			if (m_data[i_local].getContent() != CONTENT_IGNORE)
-				dst[i_dst] = m_data[i_local];
-			i_dst++;
-			i_local++;
+			if (row[x].getContent() != CONTENT_IGNORE)
+				dst[i_dst + x] = row[x];
 		}
 	}
+}
+
+bool VoxelManipulator::isUniform(v3s16 from_pos, const v3s16 &size,
+		MapNode &n) const
+{
+	if (size.X <= 0 || size.Y <= 0 || size.Z <= 0)
+		return false;
+	n = m_data[m_area.index(from_pos)];
+	if (n.getContent() == CONTENT_IGNORE)
+		return false;
+	// Compare whole nodes as 32-bit words without branching inside a row,
+	// so the compiler can vectorize the scan.
+	static_assert(sizeof(MapNode) == sizeof(u32));
+	u32 ref;
+	memcpy(&ref, &n, sizeof(ref));
+	for (s16 z = 0; z < size.Z; z++)
+	for (s16 y = 0; y < size.Y; y++) {
+		const MapNode *row = m_data +
+			m_area.index(from_pos.X, from_pos.Y + y, from_pos.Z + z);
+		u32 diff = 0;
+		for (s16 x = 0; x < size.X; x++) {
+			u32 v;
+			memcpy(&v, &row[x], sizeof(v));
+			diff |= v ^ ref;
+		}
+		if (diff)
+			return false;
+	}
+	return true;
 }
 
 /*

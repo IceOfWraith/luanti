@@ -234,6 +234,20 @@ void MapBlock::copyFrom(const VoxelManipulator &src)
 	v3s16 data_size(MAP_BLOCKSIZE, MAP_BLOCKSIZE, MAP_BLOCKSIZE);
 	VoxelArea data_area(v3s16(0,0,0), data_size - v3s16(1,1,1));
 
+	// Fast path: a uniform source (e.g. all air or all stone) would only be
+	// expanded, copied and shrunk back to a mono block.
+	// For now monoblocks are disabled on the client, see tryShrinkNodes().
+	MapNode n;
+	if (!m_gamedef->isClient() && src.isUniform(getPosRelative(), data_size, n)) {
+		if (m_is_mono_block)
+			data[0] = n;
+		else
+			reallocate(1, n);
+		m_is_air = n.getContent() == CONTENT_AIR;
+		m_is_air_expired = false;
+		return;
+	}
+
 	expandNodesIfNeeded();
 	// Copy from VoxelManipulator to data
 	src.copyTo(data, data_area, v3s16(0,0,0),
